@@ -18,7 +18,7 @@
     <div class="section">
         <h2>🛠️ Setup</h2>
         <p>1. <strong>Clone the repository:</strong></p>
-        <pre><code>git clone [[repository-url]](https://github.com/Riotcoke123/scored.co_mirrorbot)</code></pre>
+        <pre><code>git clone https://github.com/Riotcoke123/scored.co_mirrorbot</code></pre>
         <p>2. <strong>Install dependencies:</strong></p>
         <pre><code>npm install axios dotenv form-data fs-extra</code></pre>
         <p>3. <strong>Configure environment variables:</strong></p>
