@@ -35,7 +35,7 @@ const FILEDITCH_UPLOAD_URL = "https://up1.fileditch.com/upload.php";
 const SCORED_COMMENT_URL = "https://api.scored.co/api/v2/action/create_comment";
 const PROCESSED_FILE = path.join(__dirname, "processed_posts.json");
 
-const SKIPPED_DOMAINS = ["parti.com", "kick.com", "youtube.com", "youtu.be", "twitter.com", "rumble.com", "twitch.tv", "dlive.tv", "instagram.com"];
+const SKIPPED_DOMAINS = ["parti.com", "kick.com", "youtube.com", "tiktok.com", "youtu.be", "twitter.com", "rumble.com", "twitch.tv", "dlive.tv", "instagram.com"];
 const MEDIA_REGEX = /\.(mp4|jpe?g|png|gif|webp)($|\?)/i;
 
 // ----------------- HELPERS -----------------
