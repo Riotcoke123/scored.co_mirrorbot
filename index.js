@@ -96,7 +96,8 @@ function findAllMedia(post) {
   return Array.from(urls).filter((u) => {
     if (!MEDIA_REGEX.test(u)) return false;
     try {
-      const urlHost = new URL(u).hostname.replace(/^www\./, '');
+      const urlObj = new URL(u);
+      const urlHost = urlObj.hostname.replace(/^www\./, '');
       return !SKIPPED_DOMAINS.some(domain => urlHost.endsWith(domain));
     } catch (e) {
       console.error("Invalid URL:", u);
