@@ -1,28 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Scored.co Mirror Bot</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-  <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f6f8fa; padding: 20px; color: #24292f; }
-    h1, h2 { color: #0366d6; }
-    h1 { font-size: 2em; margin-bottom: 0.2em; }
-    h2 { margin-top: 1.5em; border-bottom: 2px solid #0366d6; padding-bottom: 0.2em; }
-    p { margin: 0.5em 0; }
-    code { background: #f6f8fa; border: 1px solid #d1d5da; border-radius: 6px; padding: 2px 6px; font-family: monospace; }
-    pre { background: #f6f8fa; border: 1px solid #d1d5da; border-radius: 6px; padding: 15px; overflow-x: auto; }
-    a { color: #0366d6; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    ul { margin-bottom: 20px; padding-left: 20px; }
-    section { background: #fff; padding: 20px; margin-bottom: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-    .badge { display: inline-block; padding: 2px 8px; font-size: 0.85em; font-weight: bold; border-radius: 12px; margin-right: 5px; color: #fff; }
-    .badge-license { background: #6f42c1; }
-    .badge-node { background: #43853d; }
-    .badge-npm { background: #cb3837; }
-    .icon { margin-right: 8px; color: #0366d6; }
-  </style>
+
 </head>
 <body>
   <h1><i class="fas fa-camera icon"></i>Scored.co Mirror Bot</h1>
