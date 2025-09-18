@@ -5,9 +5,9 @@ const FormData = require("form-data");
 const fse = require("fs-extra");
 const dotenv = require("dotenv");
 
-// ----------------- CONFIGURATION -----------------
 dotenv.config();
 
+// ----------------- CONFIGURATION -----------------
 const {
   X_API_KEY,
   X_API_PLATFORM,
@@ -15,12 +15,14 @@ const {
   X_XSRF_TOKEN,
   REFERER,
   USER_AGENT,
-  COMMUNITY = "IP2Always",
+  COMMUNITIES = "IP2Always,SpicTank",
   COMMENT_PARENT_ID = "0",
-  POLL_INTERVAL = 300000 // 5 minutes
+  POLL_INTERVAL = 300000, // 5 minutes
+  MAX_CONCURRENT_DOWNLOADS = 5 // Limit parallel downloads to avoid overload
 } = process.env;
 
-// Validate essential environment variables
+const communityList = COMMUNITIES.split(",").map(c => c.trim());
+
 const requiredEnv = ['X_API_KEY', 'X_API_PLATFORM', 'X_API_SECRET', 'X_XSRF_TOKEN'];
 for (const key of requiredEnv) {
   if (!process.env[key]) {
@@ -31,12 +33,9 @@ for (const key of requiredEnv) {
 
 const FILEDITCH_UPLOAD_URL = "https://up1.fileditch.com/upload.php";
 const SCORED_COMMENT_URL = "https://api.scored.co/api/v2/action/create_comment";
-const SCORED_FETCH_URL = `https://api.scored.co/api/v2/post/newv2.json?community=${COMMUNITY}`;
 const PROCESSED_FILE = path.join(__dirname, "processed_posts.json");
 
-// List of domains to skip for media downloading
-const SKIPPED_DOMAINS = ["parti.com", "kick.com", "youtube.com"];
-// This line already includes .mp4 files for processing
+const SKIPPED_DOMAINS = ["parti.com", "kick.com", "youtube.com", "youtu.be", "twitter.com", "rumble.com", "twitch.tv", "dlive.tv", "instagram.com"];
 const MEDIA_REGEX = /\.(mp4|jpe?g|png|gif|webp)($|\?)/i;
 
 // ----------------- HELPERS -----------------
@@ -77,54 +76,38 @@ async function downloadToFile(url, destPath, headers = {}) {
   });
 }
 
-/**
- * Intelligently finds all media URLs in a post object.
- * Prioritizes known high-quality media locations to avoid thumbnails.
- * This fixes the issue of re-uploaded images being smaller.
- */
 function findAllMedia(post) {
-    const urls = new Set();
+  const urls = new Set();
+  if (post?.link) urls.add(post.link);
+  if (post?.media?.url) urls.add(post.media.url);
+  if (post?.url) urls.add(post.url);
+  if (Array.isArray(post.gallery)) post.gallery.forEach(item => { if (item?.url) urls.add(item.url); });
 
-    // 1. Prioritize specific, known media fields for highest quality
-    if (post?.media?.url) urls.add(post.media.url);
-    if (post?.url) urls.add(post.url);
-
-    // 2. Check for galleries
-    if (Array.isArray(post.gallery)) {
-        post.gallery.forEach(item => {
-            if (item?.url) urls.add(item.url);
-        });
+  if (urls.size === 0) {
+    function walk(x) {
+      if (!x) return;
+      if (typeof x === "string" && x.startsWith("http")) urls.add(x);
+      else if (Array.isArray(x)) x.forEach(walk);
+      else if (typeof x === "object") Object.values(x).forEach(walk);
     }
+    walk(post);
+  }
 
-    // 3. Generic fallback: search the entire post object for URLs (less reliable)
-    if (urls.size === 0) {
-        function walk(x) {
-            if (!x) return;
-            if (typeof x === "string" && x.startsWith("http")) urls.add(x);
-            else if (Array.isArray(x)) x.forEach(walk);
-            else if (typeof x === "object") Object.values(x).forEach(walk);
-        }
-        walk(post);
+  return Array.from(urls).filter((u) => {
+    if (!MEDIA_REGEX.test(u)) return false;
+    try {
+      const urlHost = new URL(u).hostname.replace(/^www\./, '');
+      return !SKIPPED_DOMAINS.some(domain => urlHost.endsWith(domain));
+    } catch (e) {
+      console.error("Invalid URL:", u);
+      return false;
     }
-    
-    // Filter for valid media URLs from non-skipped domains
-    return Array.from(urls).filter((u) => {
-        if (!MEDIA_REGEX.test(u)) return false;
-        try {
-            const urlHost = new URL(u).hostname.replace(/^www\./, '');
-            return !SKIPPED_DOMAINS.some(domain => urlHost.endsWith(domain));
-        } catch (e) {
-            console.error("Invalid URL:", u);
-            return false;
-        }
-    });
+  });
 }
 
 async function uploadFilesToFileDitch(filePaths) {
   const form = new FormData();
-  filePaths.forEach(fp => {
-    form.append("files[]", fs.createReadStream(fp));
-  });
+  filePaths.forEach(fp => form.append("files[]", fs.createReadStream(fp)));
   const res = await axios.post(FILEDITCH_UPLOAD_URL, form, {
     headers: form.getHeaders(),
     timeout: 120000,
@@ -140,7 +123,7 @@ function extractMirrorUrl(data) {
   return data.files[0].url;
 }
 
-async function postComment(content, parentId) {
+async function postComment(content, parentId, community) {
   const headers = buildScoredHeaders();
   headers["Content-Type"] = "application/x-www-form-urlencoded";
 
@@ -148,62 +131,73 @@ async function postComment(content, parentId) {
     content,
     parentId: String(parentId),
     commentParentId: String(COMMENT_PARENT_ID),
-    community: COMMUNITY,
+    community,
   });
 
   const res = await axios.post(SCORED_COMMENT_URL, params.toString(), { headers });
   return res.data;
 }
 
+// ----------------- PROCESSED POSTS -----------------
 function loadProcessedPosts() {
   if (fs.existsSync(PROCESSED_FILE)) {
     try {
-      return new Set(JSON.parse(fs.readFileSync(PROCESSED_FILE, "utf8")));
+      return JSON.parse(fs.readFileSync(PROCESSED_FILE, "utf8"));
     } catch (e) {
       console.error("Error reading processed posts file. Starting fresh.", e);
-      return new Set();
+      return {};
     }
   }
-  return new Set();
+  return {};
 }
 
-function saveProcessedPosts(set) {
-  fs.writeFileSync(PROCESSED_FILE, JSON.stringify(Array.from(set), null, 2), "utf8");
+function saveProcessedPosts(obj) {
+  fs.writeFileSync(PROCESSED_FILE, JSON.stringify(obj, null, 2), "utf8");
 }
 
 // ----------------- PROCESS POSTS -----------------
-async function processPosts(posts, processedPosts) {
+async function processPosts(posts, processedPosts, community) {
   const downloadDir = path.join(__dirname, "downloads");
   ensureDir(downloadDir);
 
+  if (!processedPosts[community]) processedPosts[community] = [];
+
   for (const post of posts) {
     const postId = post.id;
-    if (processedPosts.has(postId)) continue;
+    if (processedPosts[community].includes(postId)) continue;
 
-    console.log(`\nProcessing post: ${postId}`);
+    console.log(`\nProcessing post: ${postId} (Community: ${community})`);
     const mediaUrls = findAllMedia(post);
 
     if (mediaUrls.length === 0) {
       console.log(` -> No new media found for post ${postId}.`);
-      processedPosts.add(postId);
+      processedPosts[community].push(postId);
       saveProcessedPosts(processedPosts);
       continue;
     }
 
     const filePaths = [];
-    for (const url of mediaUrls) {
-      try {
-        const urlObj = new URL(url);
-        const originalName = path.basename(urlObj.pathname);
-        const fileName = `${Date.now()}_${originalName.replace(/[^a-zA-Z0-9._-]/g, '')}`;
-        const filePath = path.join(downloadDir, fileName);
 
-        console.log(` -> Downloading: ${url}`);
-        await downloadToFile(url, filePath, buildScoredHeaders());
-        filePaths.push(filePath);
-      } catch (err) {
-        console.error(` -> Failed to download: ${url}`, err.message || err);
-      }
+    // Parallelized downloads with concurrency limit
+    const downloadQueue = [...mediaUrls];
+    while (downloadQueue.length > 0) {
+      const batch = downloadQueue.splice(0, MAX_CONCURRENT_DOWNLOADS);
+      const results = await Promise.all(batch.map(async (url) => {
+        try {
+          const urlObj = new URL(url);
+          const originalName = path.basename(urlObj.pathname);
+          const fileName = `${Date.now()}_${originalName.replace(/[^a-zA-Z0-9._-]/g, '')}`;
+          const filePath = path.join(downloadDir, fileName);
+          console.log(` -> Downloading: ${url}`);
+          await downloadToFile(url, filePath, buildScoredHeaders());
+          return filePath;
+        } catch (err) {
+          console.error(` -> Failed to download: ${url}`, err.message || err);
+          return null;
+        }
+      }));
+
+      results.forEach(fp => { if (fp) filePaths.push(fp); });
     }
 
     if (filePaths.length > 0) {
@@ -215,18 +209,17 @@ async function processPosts(posts, processedPosts) {
         if (mirrorUrl) {
           const commentContent = `MIRROR: ${mirrorUrl}`;
           console.log(` -> Posting comment: ${commentContent}`);
-          await postComment(commentContent, postId);
+          await postComment(commentContent, postId, community);
           console.log(` -> Successfully posted mirror for post ${postId}!`);
         }
       } catch (err) {
         console.error(` -> Failed to upload or comment for post ${postId}`, err.response?.data || err.message || err);
       } finally {
-        // Clean up downloaded files
         filePaths.forEach(fp => fse.remove(fp).catch(e => console.error(`Failed to delete file: ${fp}`, e)));
       }
     }
 
-    processedPosts.add(postId);
+    processedPosts[community].push(postId);
     saveProcessedPosts(processedPosts);
   }
 }
@@ -240,26 +233,27 @@ async function main() {
 
   const runBackup = async () => {
     console.log(`\n[${new Date().toISOString()}] Fetching new posts...`);
-    try {
-      const feed = await fetchJson(SCORED_FETCH_URL, headers);
-      const posts = Array.isArray(feed) ? feed : feed.posts || [];
-      if (posts.length > 0) {
-        // Sort from oldest to newest to process in chronological order
-        posts.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
-        await processPosts(posts, processedPosts);
-        console.log("Finished processing batch.");
-      } else {
-        console.log("No posts found in the feed.");
+
+    for (const COMMUNITY of communityList) {
+      const SCORED_FETCH_URL = `https://api.scored.co/api/v2/post/newv2.json?community=${COMMUNITY}`;
+      try {
+        const feed = await fetchJson(SCORED_FETCH_URL, headers);
+        const posts = Array.isArray(feed) ? feed : feed.posts || [];
+
+        if (posts.length > 0) {
+          posts.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+          await processPosts(posts, processedPosts, COMMUNITY);
+          console.log(`Finished processing batch for community: ${COMMUNITY}`);
+        } else {
+          console.log(`No posts found in the feed for community: ${COMMUNITY}`);
+        }
+      } catch (err) {
+        console.error(`Error fetching/processing posts for community ${COMMUNITY}:`, err.response?.data || err.message || err);
       }
-    } catch (err) {
-      console.error("Error during fetch/process cycle:", err.response?.data || err.message || err);
     }
   };
 
-  // Run once immediately on start
   await runBackup();
-
-  // Then run on a polling interval
   console.log(`Entering polling mode. Will check for new posts every ${POLL_INTERVAL / 1000 / 60} minutes.`);
   setInterval(runBackup, POLL_INTERVAL);
 }
