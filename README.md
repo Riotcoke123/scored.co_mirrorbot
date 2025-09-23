@@ -1,9 +1,5 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
+![RdHBhbbV_400x400](https://github.com/user-attachments/assets/3bae1e58-3381-4e42-805d-f64a6d198ddc)
 
-</head>
-<body>
   <h1><i class="fas fa-camera icon"></i>Scored.co Mirror Bot</h1>
 
   <p>
