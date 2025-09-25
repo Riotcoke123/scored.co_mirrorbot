@@ -1,4 +1,3 @@
-
 <div id="top">
   
   <h1 align="center">Scored.co Mirror Bot 🤖</h1>
@@ -25,6 +24,7 @@
 <ul>
   <li><a href="#about-the-project">About The Project</a></li>
   <li><a href="#features">Features</a></li>
+  <li><a href="#scoredco-api-reference">Scored.co API Reference</a></li>
   <li><a href="#getting-started">Getting Started</a>
     <ul>
       <li><a href="#prerequisites">Prerequisites</a></li>
@@ -56,6 +56,56 @@
   <li>💬 **Automated Commenting:** Posts the generated FileDitch mirror URL as a comment on the original Scored.co post.</li>
   <li>🗂️ **Post History:** Tracks processed posts in <code>processed_posts.json</code> to prevent double-posting.</li>
   <li>🗑️ **File Cleanup:** Enforces a limit on the number of local files in the <code>/downloads</code> directory (e.g., max 2 videos, max 5 images) to manage disk space.</li>
+</ul>
+
+<hr/>
+
+<h2 id="scoredco-api-reference">Scored.co API Reference</h2>
+
+<p>The bot interacts with the following private Scored.co API endpoints:</p>
+
+<h3 id="fetch-new-posts">Fetch New Posts</h3>
+<table>
+  <thead>
+    <tr>
+      <th>Action</th>
+      <th>Method</th>
+      <th>Endpoint</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Fetch New Posts in a Community</td>
+      <td><code>GET</code></td>
+      <td><code>https://api.scored.co/api/v2/post/newv2.json?community=**[COMMUNITY]**</code></td>
+    </tr>
+  </tbody>
+</table>
+<p><strong>Note:</strong> This endpoint requires the custom authentication headers defined in the <a href="#configuration-environment-variables">Configuration</a> section.</p>
+
+<h3 id="create-comment">Create Comment</h3>
+<table>
+  <thead>
+    <tr>
+      <th>Action</th>
+      <th>Method</th>
+      <th>Endpoint</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Post a Comment</td>
+      <td><code>POST</code></td>
+      <td><code>https://api.scored.co/api/v2/action/create_comment</code></td>
+    </tr>
+  </tbody>
+</table>
+<p><strong>Parameters (Form Encoded):</strong></p>
+<ul>
+  <li>`content`: The comment text (e.g., the mirror URL).</li>
+  <li>`parentId`: The ID of the post to comment on.</li>
+  <li>`commentParentId`: The parent comment ID (usually `0`).</li>
+  <li>`community`: The community where the post resides.</li>
 </ul>
 
 <hr/>
@@ -128,12 +178,3 @@ cd scored.co_mirrorbot</code></pre>
 <h2 id="license">License</h2>
 
 <p>Distributed under the **GNU General Public License v3.0**. See the <a href="https://www.gnu.org/licenses/gpl-3.0.en.html">GNU GPLv3</a> for more information.</p>
-
-
-
-
-
-
-
-2 / 2
-
