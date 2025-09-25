@@ -4,6 +4,7 @@ const axios = require("axios");
 const FormData = require("form-data");
 const fse = require("fs-extra");
 const dotenv = require("dotenv");
+const { exec } = require("child_process");
 
 dotenv.config();
 
@@ -15,15 +16,15 @@ const {
   X_XSRF_TOKEN,
   REFERER,
   USER_AGENT,
-  COMMUNITIES = "IP2Always,SpicTank",
+  COMMUNITIES = "SpicTank",
   COMMENT_PARENT_ID = "0",
   POLL_INTERVAL = 300000, // 5 minutes
-  MAX_CONCURRENT_DOWNLOADS = 5 // Limit parallel downloads to avoid overload
+  MAX_CONCURRENT_DOWNLOADS = 5,
 } = process.env;
 
-const communityList = COMMUNITIES.split(",").map(c => c.trim());
+const communityList = COMMUNITIES.split(",").map((c) => c.trim());
 
-const requiredEnv = ['X_API_KEY', 'X_API_PLATFORM', 'X_API_SECRET', 'X_XSRF_TOKEN'];
+const requiredEnv = ["X_API_KEY", "X_API_PLATFORM", "X_API_SECRET", "X_XSRF_TOKEN"];
 for (const key of requiredEnv) {
   if (!process.env[key]) {
     console.error(`Error: Missing required environment variable: ${key}`);
@@ -34,8 +35,20 @@ for (const key of requiredEnv) {
 const FILEDITCH_UPLOAD_URL = "https://up1.fileditch.com/upload.php";
 const SCORED_COMMENT_URL = "https://api.scored.co/api/v2/action/create_comment";
 const PROCESSED_FILE = path.join(__dirname, "processed_posts.json");
+const WATERMARK_PATH = path.join(__dirname, "logo.png");
 
-const SKIPPED_DOMAINS = ["parti.com", "kick.com", "youtube.com", "tiktok.com", "youtu.be", "twitter.com", "rumble.com", "twitch.tv", "dlive.tv", "instagram.com"];
+const SKIPPED_DOMAINS = [
+  "parti.com",
+  "kick.com",
+  "youtube.com",
+  "tiktok.com",
+  "youtu.be",
+  "twitter.com",
+  "rumble.com",
+  "twitch.tv",
+  "dlive.tv",
+  "instagram.com",
+];
 const MEDIA_REGEX = /\.(mp4|jpe?g|png|gif|webp)($|\?)/i;
 
 // ----------------- HELPERS -----------------
@@ -45,7 +58,7 @@ function buildScoredHeaders() {
     "x-api-platform": X_API_PLATFORM,
     "x-api-secret": X_API_SECRET,
     "x-xsrf-token": X_XSRF_TOKEN,
-    "referer": REFERER,
+    referer: REFERER,
     "user-agent": USER_AGENT,
     "sec-ch-ua": '"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"',
     "sec-ch-ua-mobile": "?0",
@@ -71,8 +84,14 @@ async function downloadToFile(url, destPath, headers = {}) {
   return new Promise((resolve, reject) => {
     res.data.pipe(writer);
     let error = null;
-    writer.on("error", (err) => { error = err; writer.close(); reject(err); });
-    writer.on("close", () => { if (!error) resolve(destPath); });
+    writer.on("error", (err) => {
+      error = err;
+      writer.close();
+      reject(err);
+    });
+    writer.on("close", () => {
+      if (!error) resolve(destPath);
+    });
   });
 }
 
@@ -81,7 +100,10 @@ function findAllMedia(post) {
   if (post?.link) urls.add(post.link);
   if (post?.media?.url) urls.add(post.media.url);
   if (post?.url) urls.add(post.url);
-  if (Array.isArray(post.gallery)) post.gallery.forEach(item => { if (item?.url) urls.add(item.url); });
+  if (Array.isArray(post.gallery))
+    post.gallery.forEach((item) => {
+      if (item?.url) urls.add(item.url);
+    });
 
   if (urls.size === 0) {
     function walk(x) {
@@ -97,8 +119,8 @@ function findAllMedia(post) {
     if (!MEDIA_REGEX.test(u)) return false;
     try {
       const urlObj = new URL(u);
-      const urlHost = urlObj.hostname.replace(/^www\./, '');
-      return !SKIPPED_DOMAINS.some(domain => urlHost.endsWith(domain));
+      const urlHost = urlObj.hostname.replace(/^www\./, "");
+      return !SKIPPED_DOMAINS.some((domain) => urlHost.endsWith(domain));
     } catch (e) {
       console.error("Invalid URL:", u);
       return false;
@@ -108,7 +130,7 @@ function findAllMedia(post) {
 
 async function uploadFilesToFileDitch(filePaths) {
   const form = new FormData();
-  filePaths.forEach(fp => form.append("files[]", fs.createReadStream(fp)));
+  filePaths.forEach((fp) => form.append("files[]", fs.createReadStream(fp)));
   const res = await axios.post(FILEDITCH_UPLOAD_URL, form, {
     headers: form.getHeaders(),
     timeout: 120000,
@@ -139,21 +161,71 @@ async function postComment(content, parentId, community) {
   return res.data;
 }
 
-// ----------------- PROCESSED POSTS -----------------
-function loadProcessedPosts() {
-  if (fs.existsSync(PROCESSED_FILE)) {
-    try {
-      return JSON.parse(fs.readFileSync(PROCESSED_FILE, "utf8"));
-    } catch (e) {
-      console.error("Error reading processed posts file. Starting fresh.", e);
-      return {};
-    }
+async function addWatermarkToVideo(inputPath, outputPath, watermarkPath) {
+  if (!fs.existsSync(watermarkPath)) {
+    console.error("Watermark file not found:", watermarkPath);
+    throw new Error("Watermark file not found.");
   }
-  return {};
+  console.log("Adding watermark to video...");
+  return new Promise((resolve, reject) => {
+    const command = `ffmpeg -i "${inputPath}" -i "${watermarkPath}" -filter_complex "[1:v]scale=300:300[logo];[0:v][logo]overlay=x=10:y=10" -c:a copy "${outputPath}"`;
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`FFmpeg error: ${stderr}`);
+        return reject(error);
+      }
+      resolve(outputPath);
+    });
+  });
+}
+
+// ----------------- PROCESSED POSTS -----------------
+function ensureProcessedPostsFile() {
+  if (!fs.existsSync(PROCESSED_FILE)) {
+    fs.writeFileSync(PROCESSED_FILE, JSON.stringify({}, null, 2), "utf8");
+    console.log("Created new processed_posts.json file.");
+  }
+}
+
+function loadProcessedPosts() {
+  ensureProcessedPostsFile();
+  try {
+    return JSON.parse(fs.readFileSync(PROCESSED_FILE, "utf8"));
+  } catch (e) {
+    console.error("Error reading processed_posts.json. Starting fresh.", e);
+    return {};
+  }
 }
 
 function saveProcessedPosts(obj) {
   fs.writeFileSync(PROCESSED_FILE, JSON.stringify(obj, null, 2), "utf8");
+}
+
+// ----------------- CLEANUP FUNCTION -----------------
+async function enforceMaxFiles(downloadDir, maxVideos = 2, maxImages = 5) {
+  const files = await fse.readdir(downloadDir);
+
+  const videos = files
+    .filter((f) => f.endsWith(".mp4"))
+    .map((f) => ({ name: f, time: fs.statSync(path.join(downloadDir, f)).mtimeMs }))
+    .sort((a, b) => a.time - b.time);
+
+  const images = files
+    .filter((f) => /\.(jpe?g|png|gif|webp)$/i.test(f))
+    .map((f) => ({ name: f, time: fs.statSync(path.join(downloadDir, f)).mtimeMs }))
+    .sort((a, b) => a.time - b.time);
+
+  while (videos.length > maxVideos) {
+    const oldest = videos.shift();
+    await fse.remove(path.join(downloadDir, oldest.name));
+    console.log(`Deleted old video: ${oldest.name}`);
+  }
+
+  while (images.length > maxImages) {
+    const oldest = images.shift();
+    await fse.remove(path.join(downloadDir, oldest.name));
+    console.log(`Deleted old image: ${oldest.name}`);
+  }
 }
 
 // ----------------- PROCESS POSTS -----------------
@@ -165,11 +237,13 @@ async function processPosts(posts, processedPosts, community) {
 
   for (const post of posts) {
     const postId = post.id;
+
+    // ----------------- DOUBLE POST PREVENTION -----------------
     if (processedPosts[community].includes(postId)) continue;
 
     console.log(`\nProcessing post: ${postId} (Community: ${community})`);
-    const mediaUrls = findAllMedia(post);
 
+    const mediaUrls = findAllMedia(post);
     if (mediaUrls.length === 0) {
       console.log(` -> No new media found for post ${postId}.`);
       processedPosts[community].push(postId);
@@ -177,34 +251,44 @@ async function processPosts(posts, processedPosts, community) {
       continue;
     }
 
-    const filePaths = [];
+    const downloadedFiles = [];
 
-    // Parallelized downloads with concurrency limit
-    const downloadQueue = [...mediaUrls];
-    while (downloadQueue.length > 0) {
-      const batch = downloadQueue.splice(0, MAX_CONCURRENT_DOWNLOADS);
-      const results = await Promise.all(batch.map(async (url) => {
-        try {
-          const urlObj = new URL(url);
-          const originalName = path.basename(urlObj.pathname);
-          const fileName = `${Date.now()}_${originalName.replace(/[^a-zA-Z0-9._-]/g, '')}`;
-          const filePath = path.join(downloadDir, fileName);
-          console.log(` -> Downloading: ${url}`);
-          await downloadToFile(url, filePath, buildScoredHeaders());
-          return filePath;
-        } catch (err) {
-          console.error(` -> Failed to download: ${url}`, err.message || err);
-          return null;
-        }
-      }));
+    for (const url of mediaUrls) {
+      try {
+        const urlObj = new URL(url);
+        const originalName = path.basename(urlObj.pathname);
+        const fileName = `${Date.now()}_${originalName.replace(/[^a-zA-Z0-9._-]/g, "")}`;
+        const filePath = path.join(downloadDir, fileName);
 
-      results.forEach(fp => { if (fp) filePaths.push(fp); });
+        console.log(` -> Downloading: ${url}`);
+        await downloadToFile(url, filePath, buildScoredHeaders());
+        downloadedFiles.push({ originalPath: filePath, fileName });
+      } catch (err) {
+        console.error(` -> Failed to download: ${url}`, err.message || err);
+      }
     }
 
-    if (filePaths.length > 0) {
+    const filesToUpload = [];
+    for (const file of downloadedFiles) {
+      const isVideo = file.originalPath.endsWith(".mp4");
+      if (isVideo) {
+        const watermarkedPath = path.join(downloadDir, `watermarked_${file.fileName}`);
+        try {
+          const processedFile = await addWatermarkToVideo(file.originalPath, watermarkedPath, WATERMARK_PATH);
+          filesToUpload.push(processedFile);
+          await fse.remove(file.originalPath);
+        } catch {
+          filesToUpload.push(file.originalPath);
+        }
+      } else {
+        filesToUpload.push(file.originalPath);
+      }
+    }
+
+    if (filesToUpload.length > 0) {
       try {
-        console.log(` -> Uploading ${filePaths.length} file(s) to FileDitch...`);
-        const uploadRes = await uploadFilesToFileDitch(filePaths);
+        console.log(` -> Uploading ${filesToUpload.length} file(s) to FileDitch...`);
+        const uploadRes = await uploadFilesToFileDitch(filesToUpload);
         const mirrorUrl = extractMirrorUrl(uploadRes);
 
         if (mirrorUrl) {
@@ -213,10 +297,11 @@ async function processPosts(posts, processedPosts, community) {
           await postComment(commentContent, postId, community);
           console.log(` -> Successfully posted mirror for post ${postId}!`);
         }
+
+        await enforceMaxFiles(downloadDir, 2, 5);
+
       } catch (err) {
         console.error(` -> Failed to upload or comment for post ${postId}`, err.response?.data || err.message || err);
-      } finally {
-        filePaths.forEach(fp => fse.remove(fp).catch(e => console.error(`Failed to delete file: ${fp}`, e)));
       }
     }
 
